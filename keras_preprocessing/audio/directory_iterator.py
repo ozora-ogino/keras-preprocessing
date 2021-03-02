@@ -73,33 +73,28 @@ class DirectoryIterator(BatchFromFilesMixin, Iterator):
 
     def __init__(self,
                  directory,
-                 image_data_generator,
-                 target_size=(256, 256),
-                 color_mode='rgb',
+                 audio_data_generator,
+                 target_size=30000,
                  classes=None,
                  class_mode='categorical',
                  batch_size=32,
                  shuffle=True,
                  seed=None,
-                 data_format='channels_last',
                  save_to_dir=None,
                  save_prefix='',
-                 save_format='png',
+                 save_format='wav',
                  follow_links=False,
                  subset=None,
                  interpolation='nearest',
-                 keep_aspect_ratio=False,
                  dtype='float32'):
         super(DirectoryIterator, self).set_processing_attrs(image_data_generator,
                                                             target_size,
-                                                            color_mode,
-                                                            data_format,
                                                             save_to_dir,
                                                             save_prefix,
                                                             save_format,
                                                             subset,
                                                             interpolation,
-                                                            keep_aspect_ratio)
+                                                            )
         self.directory = directory
         self.classes = classes
         if class_mode not in self.allowed_class_modes:
@@ -141,7 +136,7 @@ class DirectoryIterator(BatchFromFilesMixin, Iterator):
             self.classes[i:i + len(classes)] = classes
             i += len(classes)
 
-        print('Found %d images belonging to %d classes.' %
+        print('Found %d audio belonging to %d classes.' %
               (self.samples, self.num_classes))
         pool.close()
         pool.join()
