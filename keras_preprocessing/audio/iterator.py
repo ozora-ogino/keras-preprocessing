@@ -27,7 +27,7 @@ class Iterator(IteratorType):
         shuffle: Boolean, whether to shuffle the data between epochs.
         seed: Random seeding for data shuffling.
     """
-    white_list_formats = ('png', 'jpg', 'jpeg', 'bmp', 'ppm', 'tif', 'tiff')
+    white_list_formats = ('wav', 'mp3', 'flac')
 
     def __init__(self, n, batch_size, shuffle, seed):
         self.n = n
@@ -130,16 +130,15 @@ class BatchFromFilesMixin():
     """
 
     def set_processing_attrs(self,
-                             image_data_generator,
+                             audio_data_generator,
                              target_size,
-                             color_mode,
-                             data_format,
                              save_to_dir,
                              save_prefix,
                              save_format,
                              subset,
                              interpolation,
-                             keep_aspect_ratio):
+                             sr
+                             ):
         """Sets attributes to use later for processing files into a batch.
 
         # Arguments
@@ -166,35 +165,16 @@ class BatchFromFilesMixin():
                 supported. If PIL version 3.4.0 or newer is installed, "box" and
                 "hamming" are also supported. By default, "nearest" is used.
         """
-        self.image_data_generator = image_data_generator
+        self.audio_data_generator = audio_data_generator
         self.target_size = tuple(target_size)
-        self.keep_aspect_ratio = keep_aspect_ratio
-        if color_mode not in {'rgb', 'rgba', 'grayscale'}:
-            raise ValueError('Invalid color mode:', color_mode,
-                             '; expected "rgb", "rgba", or "grayscale".')
+        self.sr = sr
         self.color_mode = color_mode
-        self.data_format = data_format
-        if self.color_mode == 'rgba':
-            if self.data_format == 'channels_last':
-                self.image_shape = self.target_size + (4,)
-            else:
-                self.image_shape = (4,) + self.target_size
-        elif self.color_mode == 'rgb':
-            if self.data_format == 'channels_last':
-                self.image_shape = self.target_size + (3,)
-            else:
-                self.image_shape = (3,) + self.target_size
-        else:
-            if self.data_format == 'channels_last':
-                self.image_shape = self.target_size + (1,)
-            else:
-                self.image_shape = (1,) + self.target_size
         self.save_to_dir = save_to_dir
         self.save_prefix = save_prefix
         self.save_format = save_format
         self.interpolation = interpolation
         if subset is not None:
-            validation_split = self.image_data_generator._validation_split
+            validation_split = self.audio_data_generator._validation_split
             if subset == 'validation':
                 split = (0, validation_split)
             elif subset == 'training':
@@ -217,36 +197,34 @@ class BatchFromFilesMixin():
         # Returns
             A batch of transformed samples.
         """
-        batch_x = np.zeros((len(index_array),) + self.image_shape, dtype=self.dtype)
+        batch_x = np.zeros((len(index_array),) + self.audio_shape, dtype=self.dtype)
         # build batch of image data
         # self.filepaths is dynamic, is better to call it once outside the loop
         filepaths = self.filepaths
         for i, j in enumerate(index_array):
-            img = load_img(filepaths[j],
-                           color_mode=self.color_mode,
+            audio = load_audio(filepaths[j],
                            target_size=self.target_size,
-                           interpolation=self.interpolation,
-                           keep_aspect_ratio=self.keep_aspect_ratio)
-            x = img_to_array(img, data_format=self.data_format)
+                           interpolation=self.interpolation)
+            x = audio_to_array(audio)
             # Pillow images should be closed after `load_img`,
             # but not PIL images.
-            if hasattr(img, 'close'):
-                img.close()
-            if self.image_data_generator:
-                params = self.image_data_generator.get_random_transform(x.shape)
-                x = self.image_data_generator.apply_transform(x, params)
-                x = self.image_data_generator.standardize(x)
+            if hasattr(audio, 'close'):
+                audio.close()
+            if self.audio_data_generator:
+                params = self.audio_data_generator.get_random_transform(x.shape)
+                x = self.audio_data_generator.apply_transform(x, params)
+                x = self.audio_data_generator.standardize(x)
             batch_x[i] = x
         # optionally save augmented images to disk for debugging purposes
         if self.save_to_dir:
             for i, j in enumerate(index_array):
-                img = array_to_img(batch_x[i], self.data_format, scale=True)
+                audio = array_to_audio(batch_x[i], scale=True)
                 fname = '{prefix}_{index}_{hash}.{format}'.format(
                     prefix=self.save_prefix,
                     index=j,
                     hash=np.random.randint(1e7),
                     format=self.save_format)
-                img.save(os.path.join(self.save_to_dir, fname))
+                sf.write(os.path.join(self.save_to_dir, fname), sf, sr=self.sr)
         # build batch of labels
         if self.class_mode == 'input':
             batch_y = batch_x.copy()

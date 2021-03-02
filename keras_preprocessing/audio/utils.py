@@ -8,27 +8,10 @@ from pathlib import Path
 import numpy as np
 
 try:
-    from PIL import Image as pil_image
-    from PIL import ImageEnhance
+    import librosa
+    imoprt soundfile as sf
 except ImportError:
-    pil_image = None
-    ImageEnhance = None
-
-
-if pil_image is not None:
-    _PIL_INTERPOLATION_METHODS = {
-        'nearest': pil_image.NEAREST,
-        'bilinear': pil_image.BILINEAR,
-        'bicubic': pil_image.BICUBIC,
-    }
-    # These methods were only introduced in version 3.4.0 (2016).
-    if hasattr(pil_image, 'HAMMING'):
-        _PIL_INTERPOLATION_METHODS['hamming'] = pil_image.HAMMING
-    if hasattr(pil_image, 'BOX'):
-        _PIL_INTERPOLATION_METHODS['box'] = pil_image.BOX
-    # This method is new in version 1.1.3 (2013).
-    if hasattr(pil_image, 'LANCZOS'):
-        _PIL_INTERPOLATION_METHODS['lanczos'] = pil_image.LANCZOS
+    librosa = None
 
 
 def validate_filename(filename, white_list_formats):
@@ -41,13 +24,12 @@ def validate_filename(filename, white_list_formats):
     # Returns
         A boolean value indicating if the filename is valid or not
     """
-    return (filename.lower().endswith(white_list_formats) and
-            os.path.isfile(filename))
+    return (filename.lower().endswith(white_list_formats) and os.path.isfile(filename))
 
 
 def save_audio(path,
              x,
-             data_format='channels_last',
+             sr=16000,
              file_format=None,
              scale=True,
              **kwargs):
@@ -65,16 +47,11 @@ def save_audio(path,
         scale: Whether to rescale image values to be within `[0, 255]`.
         **kwargs: Additional keyword arguments passed to `PIL.Image.save()`.
     """
-    audio = array_to_audio(x, data_format=data_format, scale=scale)
-    if img.mode == 'RGBA' and (file_format == 'jpg' or file_format == 'jpeg'):
-        warnings.warn('The JPG format does not support '
-                      'RGBA images, converting to RGB.')
-        img = img.convert('RGB')
-    img.save(path, format=file_format, **kwargs)
+    sf.write(path, y, sr, format=file_format)
 
 
-def load_img(path, grayscale=False, color_mode='rgb', target_size=None,
-             interpolation='nearest', keep_aspect_ratio=False):
+def load_audio(path, grayscale=False, sr=16000, target_size=None,
+             interpolation='nearest'):
     """Loads an image into PIL format.
 
     # Arguments
@@ -104,76 +81,34 @@ def load_img(path, grayscale=False, color_mode='rgb', target_size=None,
         ValueError: if interpolation method is not supported.
         TypeError: type of 'path' should be path-like or io.Byteio.
     """
-    if grayscale is True:
-        warnings.warn('grayscale is deprecated. Please use '
-                      'color_mode = "grayscale"')
-        color_mode = 'grayscale'
-    if pil_image is None:
-        raise ImportError('Could not import PIL.Image. '
-                          'The use of `load_img` requires PIL.')
+    if librosa is None:
+        raise ImportError('Could not import librosa.')
+
     if isinstance(path, io.BytesIO):
-        img = pil_image.open(path)
+        audio, sr = librosa.load(path, sr=sr)
     elif isinstance(path, (Path, bytes, str)):
         if isinstance(path, Path):
             path = str(path.resolve())
         with open(path, 'rb') as f:
-            img = pil_image.open(io.BytesIO(f.read()))
+            audio = librosa.load(io.BytesIO(f.read()))
     else:
         raise TypeError('path should be path-like or io.BytesIO'
                         ', not {}'.format(type(path)))
-
-    if color_mode == 'grayscale':
-        # if image is not already an 8-bit, 16-bit or 32-bit grayscale image
-        # convert it to an 8-bit grayscale image.
-        if img.mode not in ('L', 'I;16', 'I'):
-            img = img.convert('L')
-    elif color_mode == 'rgba':
-        if img.mode != 'RGBA':
-            img = img.convert('RGBA')
-    elif color_mode == 'rgb':
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-    else:
-        raise ValueError('color_mode must be "grayscale", "rgb", or "rgba"')
     if target_size is not None:
-        width_height_tuple = (target_size[1], target_size[0])
-        if img.size != width_height_tuple:
-            if interpolation not in _PIL_INTERPOLATION_METHODS:
-                raise ValueError(
-                    'Invalid interpolation method {} specified. Supported '
-                    'methods are {}'.format(
-                        interpolation,
-                        ", ".join(_PIL_INTERPOLATION_METHODS.keys())))
-            resample = _PIL_INTERPOLATION_METHODS[interpolation]
+        if len(audio) != target_size:
+            length = len(audio)
 
-            if keep_aspect_ratio:
-                width, height = img.size
-                target_width, target_height = width_height_tuple
-
-                crop_height = (width * target_height) // target_width
-                crop_width = (height * target_width) // target_height
-
-                # Set back to input height / width
-                # if crop_height / crop_width is not smaller.
-                crop_height = min(height, crop_height)
-                crop_width = min(width, crop_width)
-
-                crop_box_hstart = (height - crop_height) // 2
-                crop_box_wstart = (width - crop_width) // 2
-                crop_box_wend = crop_box_wstart + crop_width
-                crop_box_hend = crop_box_hstart + crop_height
-                crop_box = [
-                    crop_box_wstart, crop_box_hstart, crop_box_wend,
-                    crop_box_hend
-                ]
-                img = img.resize(width_height_tuple, resample, box=crop_box)
+            # Set back to input height / width
+            # if crop_height / crop_width is not smaller.
+            crop_length = min(length, target_size)
+            if target_size < length:
+                audio = audio[:target_size]
             else:
-                img = img.resize(width_height_tuple, resample)
-    return img
+                audio = np.append(audio, np.zeros(target_size-length))
+    return audio
 
 
-def list_pictures(directory, ext=('jpg', 'jpeg', 'bmp', 'png', 'ppm', 'tif',
-                                  'tiff')):
+def list_audio(directory, ext=('wav', 'mp3', 'flac')):
     """Lists all pictures in a directory, including all subdirectories.
 
     # Arguments
@@ -208,9 +143,6 @@ def _iter_valid_files(directory, white_list_formats, follow_links):
 
     for root, _, files in _recursive_list(directory):
         for fname in sorted(files):
-            if fname.lower().endswith('.tiff'):
-                warnings.warn('Using ".tiff" files with multiple bands '
-                              'will cause distortion. Please verify your output.')
             if fname.lower().endswith(white_list_formats):
                 yield root, fname
 
@@ -261,7 +193,7 @@ def _list_valid_filenames_in_directory(directory, white_list_formats, split,
     return classes, filenames
 
 
-def array_to_img(x, data_format='channels_last', scale=True, dtype='float32'):
+def array_to_audio(x, scale=True, dtype='float32'):
     """Converts a 3D Numpy array to a PIL Image instance.
 
     # Arguments
@@ -281,45 +213,27 @@ def array_to_img(x, data_format='channels_last', scale=True, dtype='float32'):
         ImportError: if PIL is not available.
         ValueError: if invalid `x` or `data_format` is passed.
     """
-    if pil_image is None:
+    if librosa is None:
         raise ImportError('Could not import PIL.Image. '
                           'The use of `array_to_img` requires PIL.')
     x = np.asarray(x, dtype=dtype)
-    if x.ndim != 3:
-        raise ValueError('Expected image array to have rank 3 (single image). '
+    if x.ndim != 1:
+        raise ValueError('Expected audio array to have rank 1. '
                          'Got array with shape: %s' % (x.shape,))
-
-    if data_format not in {'channels_first', 'channels_last'}:
-        raise ValueError('Invalid data_format: %s' % data_format)
 
     # Original Numpy array x has format (height, width, channel)
     # or (channel, height, width)
     # but target PIL image has format (width, height, channel)
-    if data_format == 'channels_first':
-        x = x.transpose(1, 2, 0)
     if scale:
         x = x - np.min(x)
         x_max = np.max(x)
         if x_max != 0:
             x /= x_max
         x *= 255
-    if x.shape[2] == 4:
-        # RGBA
-        return pil_image.fromarray(x.astype('uint8'), 'RGBA')
-    elif x.shape[2] == 3:
-        # RGB
-        return pil_image.fromarray(x.astype('uint8'), 'RGB')
-    elif x.shape[2] == 1:
-        # grayscale
-        if np.max(x) > 255:
-            # 32-bit signed integer grayscale image. PIL mode "I"
-            return pil_image.fromarray(x[:, :, 0].astype('int32'), 'I')
-        return pil_image.fromarray(x[:, :, 0].astype('uint8'), 'L')
-    else:
-        raise ValueError('Unsupported channel number: %s' % (x.shape[2],))
+        return x
 
 
-def img_to_array(img, data_format='channels_last', dtype='float32'):
+def audio_to_array(audio, dtype='float32'):
     """Converts a PIL Image instance to a Numpy array.
 
     # Arguments
@@ -334,20 +248,8 @@ def img_to_array(img, data_format='channels_last', dtype='float32'):
     # Raises
         ValueError: if invalid `img` or `data_format` is passed.
     """
-    if data_format not in {'channels_first', 'channels_last'}:
-        raise ValueError('Unknown data_format: %s' % data_format)
     # Numpy array x has format (height, width, channel)
     # or (channel, height, width)
     # but original PIL image has format (width, height, channel)
-    x = np.asarray(img, dtype=dtype)
-    if len(x.shape) == 3:
-        if data_format == 'channels_first':
-            x = x.transpose(2, 0, 1)
-    elif len(x.shape) == 2:
-        if data_format == 'channels_first':
-            x = x.reshape((1, x.shape[0], x.shape[1]))
-        else:
-            x = x.reshape((x.shape[0], x.shape[1], 1))
-    else:
-        raise ValueError('Unsupported image shape: %s' % (x.shape,))
+    x = np.asarray(audio, dtype=dtype)
     return x
