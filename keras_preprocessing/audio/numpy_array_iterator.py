@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 
 from .iterator import Iterator
-from .utils import array_to_img
+from .utils import array_to_audio
 
 
 class NumpyArrayIterator(Iterator):
@@ -54,15 +54,15 @@ class NumpyArrayIterator(Iterator):
     def __init__(self,
                  x,
                  y,
-                 image_data_generator,
+                 audio_data_generator,
                  batch_size=32,
                  shuffle=False,
+                 sr=16000,
                  sample_weight=None,
                  seed=None,
-                 data_format='channels_last',
                  save_to_dir=None,
                  save_prefix='',
-                 save_format='png',
+                 save_format='wav',
                  subset=None,
                  ignore_class_split=False,
                  dtype='float32'):
@@ -125,16 +125,6 @@ class NumpyArrayIterator(Iterator):
             raise ValueError('Input data in `NumpyArrayIterator` '
                              'should have rank 4. You passed an array '
                              'with shape', self.x.shape)
-        channels_axis = 3 if data_format == 'channels_last' else 1
-        if self.x.shape[channels_axis] not in {1, 3, 4}:
-            warnings.warn('NumpyArrayIterator is set to use the '
-                          'data format convention "' + data_format + '" '
-                          '(channels on axis ' + str(channels_axis) +
-                          '), i.e. expected either 1, 3, or 4 '
-                          'channels on axis ' + str(channels_axis) + '. '
-                          'However, it was passed an array with shape ' +
-                          str(self.x.shape) + ' (' +
-                          str(self.x.shape[channels_axis]) + ' channels).')
         if y is not None:
             self.y = np.asarray(y)
         else:
@@ -143,8 +133,7 @@ class NumpyArrayIterator(Iterator):
             self.sample_weight = np.asarray(sample_weight)
         else:
             self.sample_weight = None
-        self.image_data_generator = image_data_generator
-        self.data_format = data_format
+        self.audio_data_generator = audio_data_generator
         self.save_to_dir = save_to_dir
         self.save_prefix = save_prefix
         self.save_format = save_format
@@ -158,21 +147,21 @@ class NumpyArrayIterator(Iterator):
                            dtype=self.dtype)
         for i, j in enumerate(index_array):
             x = self.x[j]
-            params = self.image_data_generator.get_random_transform(x.shape)
-            x = self.image_data_generator.apply_transform(
+            params = self.audio_data_generator.get_random_transform(x.shape)
+            x = self.audio_data_generator.apply_transform(
                 x.astype(self.dtype), params)
-            x = self.image_data_generator.standardize(x)
+            x = self.audio_data_generator.standardize(x)
             batch_x[i] = x
 
         if self.save_to_dir:
             for i, j in enumerate(index_array):
-                img = array_to_img(batch_x[i], self.data_format, scale=True)
+                audio = array_to_audio(batch_x[i], self.data_format, scale=True)
                 fname = '{prefix}_{index}_{hash}.{format}'.format(
                     prefix=self.save_prefix,
                     index=j,
                     hash=np.random.randint(1e4),
                     format=self.save_format)
-                img.save(os.path.join(self.save_to_dir, fname))
+                sf.write(os.path.join(self.save_to_dir, fname), audio, sr=sr)
         batch_x_miscs = [xx[index_array] for xx in self.x_misc]
         output = (batch_x if batch_x_miscs == []
                   else [batch_x] + batch_x_miscs,)
